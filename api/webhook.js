@@ -1,4 +1,4 @@
-import OpenAI from "openai";
+import OpenAI, { toFile } from "openai";
 
 const { TELEGRAM_BOT_TOKEN, OPENAI_API_KEY } = process.env;
 
@@ -46,7 +46,7 @@ async function getFileUrl(fileId) {
 async function transcribe(fileUrl) {
   const response = await fetch(fileUrl);
   const buffer = Buffer.from(await response.arrayBuffer());
-  const file = await openai.toFile(buffer, "audio.ogg", { type: "audio/ogg" });
+  const file = await toFile(buffer, "audio.ogg", { type: "audio/ogg" });
 
   const transcription = await openai.audio.transcriptions.create({
     model: "whisper-1",
@@ -84,8 +84,21 @@ function extractAudio(message) {
     };
   }
 
-  // Document that's actually an audio file
-  if (message.document && message.document.mime_type?.startsWith("audio/")) {
+  // Video (WhatsApp forwards often come as video with audio)
+  if (message.video) {
+    return {
+      fileId: message.video.file_id,
+      fileSize: message.video.file_size,
+      duration: message.video.duration,
+    };
+  }
+
+  // Document that's actually an audio or video file
+  if (
+    message.document &&
+    (message.document.mime_type?.startsWith("audio/") ||
+      message.document.mime_type?.startsWith("video/"))
+  ) {
     return {
       fileId: message.document.file_id,
       fileSize: message.document.file_size,
@@ -141,7 +154,7 @@ async function handleMessage(message) {
 
     await sendMessage(chatId, text, message.message_id);
   } catch (err) {
-    console.error("Transcription error:", err);
+    console.error("Transcription error:", err?.message || err, err?.response?.data || "");
     await sendMessage(chatId, "Something went wrong with the transcription.", message.message_id);
   }
 }
