@@ -1,12 +1,8 @@
-import OpenAI, { toFile } from "openai";
-
 const { TELEGRAM_BOT_TOKEN, OPENAI_API_KEY } = process.env;
 
 const TELEGRAM_API = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}`;
 const TELEGRAM_FILE_API = `https://api.telegram.org/file/bot${TELEGRAM_BOT_TOKEN}`;
 const MAX_FILE_SIZE = 25 * 1024 * 1024; // 25MB — OpenAI Whisper limit
-
-const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
 
 // --- Telegram helpers ---
 
@@ -44,16 +40,31 @@ async function getFileUrl(fileId) {
 // --- Core logic ---
 
 async function transcribe(fileUrl) {
+  // Download from Telegram
   const response = await fetch(fileUrl);
-  const buffer = Buffer.from(await response.arrayBuffer());
-  const file = await toFile(buffer, "audio.ogg", { type: "audio/ogg" });
+  if (!response.ok) {
+    throw new Error(`Telegram file download failed: ${response.status}`);
+  }
+  const audioBlob = await response.blob();
 
-  const transcription = await openai.audio.transcriptions.create({
-    model: "whisper-1",
-    file,
+  // Send to OpenAI Whisper via raw fetch (SDK has issues on Vercel)
+  const form = new FormData();
+  form.append("file", audioBlob, "audio.ogg");
+  form.append("model", "whisper-1");
+
+  const result = await fetch("https://api.openai.com/v1/audio/transcriptions", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${OPENAI_API_KEY}` },
+    body: form,
   });
 
-  return transcription.text;
+  if (!result.ok) {
+    const err = await result.text();
+    throw new Error(`OpenAI API error ${result.status}: ${err}`);
+  }
+
+  const data = await result.json();
+  return data.text;
 }
 
 function extractAudio(message) {
