@@ -26,7 +26,7 @@ async function sendChatAction(chatId, action = "typing") {
   });
 }
 
-async function getFileUrl(fileId) {
+async function getFile(fileId) {
   const res = await fetch(`${TELEGRAM_API}/getFile`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -34,12 +34,16 @@ async function getFileUrl(fileId) {
   });
   const data = await res.json();
   if (!data.ok) return null;
-  return `${TELEGRAM_FILE_API}/${data.result.file_path}`;
+  const filePath = data.result.file_path;
+  return {
+    url: `${TELEGRAM_FILE_API}/${filePath}`,
+    filename: filePath.split("/").pop(),
+  };
 }
 
 // --- Core logic ---
 
-async function transcribe(fileUrl) {
+async function transcribe(fileUrl, filename) {
   // Download from Telegram
   const response = await fetch(fileUrl);
   if (!response.ok) {
@@ -49,7 +53,7 @@ async function transcribe(fileUrl) {
 
   // Send to OpenAI Whisper via raw fetch (SDK has issues on Vercel)
   const form = new FormData();
-  form.append("file", audioBlob, "audio.ogg");
+  form.append("file", audioBlob, filename);
   form.append("model", "whisper-1");
 
   const result = await fetch("https://api.openai.com/v1/audio/transcriptions", {
@@ -150,13 +154,13 @@ async function handleMessage(message) {
   await sendChatAction(chatId);
 
   try {
-    const fileUrl = await getFileUrl(audio.fileId);
-    if (!fileUrl) {
+    const file = await getFile(audio.fileId);
+    if (!file) {
       await sendMessage(chatId, "Couldn't retrieve the file from Telegram.", message.message_id);
       return;
     }
 
-    const text = await transcribe(fileUrl);
+    const text = await transcribe(file.url, file.filename);
 
     if (!text || text.trim().length === 0) {
       await sendMessage(chatId, "No speech detected.", message.message_id);
